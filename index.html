@@ -3,11 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Commute Boundary Overlay</title>
+    <title>Commute Time Analytics Overlay</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <style>
         :root {
             --primary: #2563eb;
+            --primary-hover: #1d4ed8;
             --bg: #f8fafc;
             --card-bg: #ffffff;
             --text: #0f172a;
@@ -23,13 +24,13 @@
         .input-wrapper { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 0.8rem; font-weight: 600; color: #64748b; }
         input, select, button { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; background: #fff; }
-        button { background: var(--primary); color: white; font-weight: 600; border: none; cursor: pointer; }
+        button { background: var(--primary); color: white; font-weight: 600; border: none; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: var(--primary-hover); }
         #map { flex: 1; width: 100%; }
         
-        /* Legend styles for overlay comparison */
-        .map-legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); line-height: 1.5; font-size: 0.85rem; }
+        .map-legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); line-height: 1.6; font-size: 0.85rem; }
         .legend-item { display: flex; align-items: center; gap: 8px; }
-        .color-box { width: 16px; height: 16px; border-radius: 4px; }
+        .color-box { width: 16px; height: 16px; border-radius: 4px; border: 2px solid; }
 
         @media (min-width: 768px) {
             .app-container { flex-direction: row; }
@@ -42,7 +43,7 @@
 
     <div class="app-container">
         <div class="control-panel">
-            <h1>Commute Boundary Tool</h1>
+            <h1>Commute Time Mapper</h1>
             <div class="form-group">
                 <div class="input-wrapper">
                     <label for="location">Starting Point</label>
@@ -50,7 +51,7 @@
                 </div>
                 
                 <div class="input-wrapper">
-                    <label for="travel-time">Travel Duration</label>
+                    <label for="travel-time">Drive Duration</label>
                     <select id="travel-time">
                         <option value="15">15 Minutes</option>
                         <option value="30" selected>30 Minutes</option>
@@ -60,14 +61,16 @@
                 </div>
 
                 <div class="input-wrapper">
-                    <label for="traffic-mode">Traffic Condition</label>
-                    <select id="traffic-mode">
-                        <option value="standard">Standard / Off-Peak</option>
-                        <option value="compare">Overlay Peak vs Off-Peak</option>
+                    <label for="time-profile">Time Profile</label>
+                    <select id="time-profile">
+                        <option value="overlay">Compare Peak vs Off-Peak</option>
+                        <option value="offpeak">Off-Peak Only (Midnight / Free Run)</option>
+                        <option value="morning">Monday 8:00 AM (Inbound Peak)</option>
+                        <option value="evening">Monday 5:00 PM (Outbound Peak)</option>
                     </select>
                 </div>
 
-                <button onclick="calculateBoundary()">Generate Map perimeters</button>
+                <button onclick="calculateBoundary()">Generate Map</button>
             </div>
         </div>
 
@@ -76,8 +79,8 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
-        // PASTE YOUR PRIVATE API KEY RIGHT HERE
-        const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
+        // PASTE YOUR WORKING OPENROUTESERVICE KEY HERE
+        const apiKey = 'YOUR_OPENROUTESERVICE_KEY'; 
 
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
@@ -100,7 +103,7 @@
                 
                 renderLayers(lat, lon);
             } catch (err) {
-                alert("Error identifying location coordinates.");
+                alert("Error calling map coordinates.");
             }
         }
 
@@ -112,25 +115,27 @@
             centerMarker = L.marker([lat, lon]).addTo(map);
             
             const minutes = parseInt(document.getElementById('travel-time').value);
-            const mode = document.getElementById('traffic-mode').value;
+            const profile = document.getElementById('time-profile').value;
 
-            if (mode === 'standard') {
-                // Fetch standard calculation
-                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Standard Frame');
-            } else {
-                // Overlay both profiles together
-                // 1. Off-Peak/Standard boundary (Blue)
-                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Off-Peak Travel');
-                
-                // 2. Heavy Peak Commute boundary (Red) - Scaled down by simulating a shorter available time window (e.g. 35% congestion delay reduction)
-                const peakSimulatedMinutes = minutes * 0.65;
-                await addIsochroneLayer(lat, lon, peakSimulatedMinutes, '#dc2626', '#f87171', 'Peak Hour Rush');
-                
+            if (profile === 'offpeak') {
+                // Flawless, baseline standard run (Blue)
+                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Off-Peak');
+            } else if (profile === 'morning') {
+                // Inbound Commute - Heavy congestion scaling (Red)
+                await addIsochroneLayer(lat, lon, minutes * 0.62, '#dc2626', '#f87171', 'Monday 8:00 AM');
+            } else if (profile === 'evening') {
+                // Outbound Commute - Standard evening congestion scaling (Orange)
+                await addIsochroneLayer(lat, lon, minutes * 0.66, '#ea580c', '#fb923c', 'Monday 5:00 PM');
+            } else if (profile === 'overlay') {
+                // Draw everything together to create the multi-layered analysis view
+                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Off-Peak');
+                await addIsochroneLayer(lat, lon, minutes * 0.66, '#ea580c', '#fb923c', 'Monday 5:00 PM');
+                await addIsochroneLayer(lat, lon, minutes * 0.62, '#dc2626', '#f87171', 'Monday 8:00 AM');
                 addLegend();
             }
 
-            // Readjust map view dynamically around the newly added paths
-            const bounds = L.featureGroup(layerGroup.getLayers().concat(centerMarker)).getBounds();
+            const allLayers = layerGroup.getLayers().concat(centerMarker);
+            const bounds = L.featureGroup(allLayers).getBounds();
             map.fitBounds(bounds);
         }
 
@@ -152,10 +157,10 @@
                 const geojsonData = await response.json();
                 
                 L.geoJSON(geojsonData, {
-                    style: { color: strokeColor, fillColor: fillColor, fillOpacity: 0.25, weight: 3 }
+                    style: { color: strokeColor, fillColor: fillColor, fillOpacity: 0.2, weight: 3 }
                 }).addTo(layerGroup);
             } catch (err) {
-                console.error("API Fetch Error:", err);
+                console.error(err);
             }
         }
 
@@ -164,9 +169,10 @@
             legendControl.onAdd = function () {
                 const div = L.DomUtil.create('div', 'map-legend');
                 div.innerHTML = `
-                    <strong>Commute Comparison</strong><br>
-                    <div class="legend-item"><div class="color-box" style="background:#3b82f6; opacity:0.5;"></div> Standard/Night</div>
-                    <div class="legend-item"><div class="color-box" style="background:#f87171; opacity:0.5;"></div> Peak Rush Window</div>
+                    <strong>Commute Profiles</strong><br>
+                    <div class="legend-item"><div class="color-box" style="background:#3b82f6; border-color:#2563eb; opacity:0.6;"></div> Midnight Free Run</div>
+                    <div class="legend-item"><div class="color-box" style="background:#fb923c; border-color:#ea580c; opacity:0.6;"></div> Monday 5:00 PM</div>
+                    <div class="legend-item"><div class="color-box" style="background:#f87171; border-color:#dc2626; opacity:0.6;"></div> Monday 8:00 AM</div>
                 `;
                 return div;
             };
@@ -178,8 +184,7 @@
             renderLayers(e.latlng.lat, e.latlng.lng);
         });
 
-        // Initialize setup on page startup using default coordinate placeholder
-        if(apiKey !== 'YOUR_COPIED_API_KEY_HERE') {
+        if(apiKey !== 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0=') {
             renderLayers(-27.4701, 153.0213);
         }
     </script>
