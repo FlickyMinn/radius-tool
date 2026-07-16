@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Overlay Commute Mapper</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
         body { display: flex; flex-direction: column; height: 100vh; background: #f8fafc; color: #0f172a; }
@@ -17,7 +16,6 @@
         label { font-size: 0.8rem; font-weight: 600; color: #64748b; }
         input, select, button { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; }
         
-        /* Action Button Styles */
         button { background: #2563eb; color: white; font-weight: 600; border: none; cursor: pointer; transition: background 0.2s; }
         button:hover { background: #1d4ed8; }
         
@@ -28,9 +26,6 @@
         .btn-clear { background: #64748b; margin-top: 4px; }
         .btn-clear:hover { background: #475569; }
         #map { flex: 1; width: 100%; }
-        
-        /* Hide default tiny leaflet plugin control box so it doesn't clutter map */
-        .leaflet-control-measure { display: none !important; }
         
         .map-legend { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); line-height: 1.6; font-size: 0.85rem; max-width: 240px; }
         .legend-title { font-weight: 700; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
@@ -79,7 +74,6 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.js"></script>
     <script>
         // STEP 1: PUSH YOUR ACTUAL TOKEN PRECISELY BETWEEN THESE QUOTES
         const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
@@ -87,17 +81,17 @@
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
-        // Standardise measurement configurations
-        const measureControl = new L.Control.Measure({
-            primaryLengthUnit: 'kilometers',
-            secondaryLengthUnit: 'meters',
-            primaryAreaUnit: 'sqkilometers',
-            activeColor: '#db2777',
-            completedColor: '#9d174d'
-        });
-        measureControl.addTo(map);
-
         let layerGroup = L.layerGroup().addTo(map);
         let centerMarker = null;
         let legendControl = null;
-        let is
+        
+        // Custom measurement engine state tracking
+        let isRulerActive = false;
+        let measurePoints = [];
+        let measureLine = null;
+        let measureMarkers = [];
+
+        let currentLat = -27.4701;
+        let currentLng = 153.0213;
+
+        const colors =
