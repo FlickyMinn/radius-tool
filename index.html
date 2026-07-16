@@ -94,4 +94,196 @@
         let currentLat = -27.4701;
         let currentLng = 153.0213;
 
-        const colors =
+        const colors = [
+            { stroke: '#2563eb', fill: '#3b82f6' }, 
+            { stroke: '#dc2626', fill: '#f87171' }, 
+            { stroke: '#ea580c', fill: '#fb923c' }, 
+            { stroke: '#16a34a', fill: '#4ade80' }, 
+            { stroke: '#9333ea', fill: '#c084fc' }  
+        ];
+        let colorIndex = 0;
+        let activeLayersData = [];
+
+        function toggleRulerTool() {
+            const btn = document.getElementById('measure-btn');
+            isRulerActive = !isRulerActive;
+
+            if (isRulerActive) {
+                btn.innerText = "Ruler Active: Click 2 Points";
+                btn.classList.add('active');
+                clearMeasurementDrawing();
+            } else {
+                btn.innerText = "Turn On Distance Ruler";
+                btn.classList.remove('active');
+                clearMeasurementDrawing();
+            }
+        }
+
+        function clearMeasurementDrawing() {
+            measurePoints = [];
+            if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+            measureMarkers.forEach(m => map.removeLayer(m));
+            measureMarkers = [];
+        }
+
+        function updateLegendUI() {
+            if (legendControl) map.removeControl(legendControl);
+            if (activeLayersData.length === 0) return;
+
+            legendControl = L.control({ position: 'bottomright' });
+            legendControl.onAdd = function () {
+                const div = L.DomUtil.create('div', 'map-legend');
+                div.innerHTML = `<div class="legend-title">Active Overlays</div>`;
+                activeLayersData.forEach(item => {
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <div class="color-box" style="background:${item.style.fill}; border-color:${item.style.stroke};"></div>
+                            <span>${item.label}</span>
+                        </div>`;
+                });
+                return div;
+            };
+            legendControl.addTo(map);
+        }
+
+        function clearAllLayers() {
+            layerGroup.clearLayers();
+            if (centerMarker) map.removeLayer(centerMarker);
+            centerMarker = null;
+            colorIndex = 0;
+            activeLayersData = [];
+            if (legendControl) map.removeControl(legendControl);
+            clearMeasurementDrawing();
+            if (isRulerActive) toggleRulerTool();
+        }
+
+        async function handleGenerateButton() {
+            const locationInput = document.getElementById('location').value.trim();
+            const coordRegex = /^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/;
+            
+            if (coordRegex.test(locationInput)) {
+                const parts = locationInput.split(',');
+                currentLat = parseFloat(parts[0]);
+                currentLng = parseFloat(parts[1]);
+                runDrawingEngine(currentLat, currentLng);
+            } else {
+                try {
+                    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationInput)}`);
+                    const data = await response.json();
+                    if (!data || data.length === 0) return alert("Location not found.");
+
+                    currentLat = parseFloat(data[0].lat);
+                    currentLng = parseFloat(data[0].lon);
+                    
+                    document.getElementById('location').value = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
+                    runDrawingEngine(currentLat, currentLng);
+                } catch (err) {
+                    alert("Address lookup failed.");
+                }
+            }
+        }
+
+        function runDrawingEngine(lat, lon) {
+            if (!centerMarker) {
+                centerMarker = L.marker([lat, lon]).addTo(map);
+            } else {
+                centerMarker.setLatLng([lat, lon]);
+            }
+
+            const inputVal = parseFloat(document.getElementById('target-val').value);
+            const selectedMode = document.getElementById('mode-select').value;
+            const modeText = document.getElementById('mode-select').options[document.getElementById('mode-select').selectedIndex].text;
+            
+            const currentStyle = colors[colorIndex % colors.length];
+            colorIndex++;
+
+            const layerLabel = `${inputVal}${selectedMode === 'distance' ? 'km' : ' min'} (${modeText.split('(')[0].trim()})`;
+
+            if (selectedMode === 'distance') {
+                const newCircle = L.circle([lat, lon], {
+                    color: currentStyle.stroke,
+                    fillColor: currentStyle.fill,
+                    fillOpacity: 0.15,
+                    radius: inputVal * 1000
+                }).addTo(layerGroup);
+                
+                activeLayersData.push({ label: layerLabel, style: currentStyle });
+                updateLegendUI();
+                
+                const allLayers = layerGroup.getLayers().concat(centerMarker);
+                map.fitBounds(L.featureGroup(allLayers).getBounds());
+            } else {
+                let minutes = inputVal;
+                if (selectedMode === 'time-traffic') {
+                    minutes = inputVal * 0.65;
+                }
+                fetchDrivePerimeter(lat, lon, minutes, currentStyle, layerLabel);
+            }
+        }
+
+        async function fetchDrivePerimeter(lat, lon, minutes, style, label) {
+            const seconds = Math.round(minutes * 60);
+            const url = `https://api.openrouteservice.org/v2/isochrones/driving-car`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': apiKey },
+                    body: JSON.stringify({
+                        locations: [[parseFloat(lon), parseFloat(lat)]],
+                        range: [seconds],
+                        range_type: 'time'
+                    })
+                });
+
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+                const geojsonData = await response.json();
+                
+                L.geoJSON(geojsonData, {
+                    style: { color: style.stroke, fillColor: style.fill, fillOpacity: 0.15, weight: 3 }
+                }).addTo(layerGroup);
+
+                activeLayersData.push({ label: label, style: style });
+                updateLegendUI();
+                
+                const allLayers = layerGroup.getLayers().concat(centerMarker);
+                map.fitBounds(L.featureGroup(allLayers).getBounds());
+            } catch (err) {
+                alert("Drive perimeter calculation failed.");
+            }
+        }
+
+        // Map Interactions Router
+        map.on('click', function(e) {
+            if (isRulerActive) {
+                // RUN NATIVE MEASUREMENT ENGINE
+                measurePoints.push(e.latlng);
+                
+                const dot = L.circleMarker(e.latlng, { radius: 5, color: '#db2777', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+                measureMarkers.push(dot);
+
+                if (measurePoints.length === 1) {
+                    dot.bindPopup("Start point selected.").openPopup();
+                } else if (measurePoints.length === 2) {
+                    // Compute pure point-to-point geometric distance in meters
+                    const distanceMeters = measurePoints[0].distanceTo(measurePoints[1]);
+                    const distanceKm = (distanceMeters / 1000).toFixed(2);
+
+                    measureLine = L.polyline(measurePoints, { color: '#db2777', weight: 4, dashArray: '6, 6' }).addTo(map);
+                    
+                    dot.bindPopup(`<strong>Distance:</strong> ${distanceKm} km`).openPopup();
+                    
+                    // Reset tool cleanly after displaying computation
+                    toggleRulerTool();
+                }
+            } else {
+                // NORMAL MODE: Update text coordinates box cleanly
+                currentLat = e.latlng.lat;
+                currentLng = e.latlng.lng;
+                document.getElementById('location').value = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
+            }
+        });
+    </script>
+</body>
+</html>
