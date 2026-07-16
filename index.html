@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Commute Time Analytics Overlay</title>
+    <title>Advanced Map Analytics Tool</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <style>
         :root {
@@ -20,17 +20,22 @@
         .control-panel { background: var(--card-bg); padding: 16px; z-index: 1000; border-bottom: 1px solid var(--border); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
         h1 { font-size: 1.2rem; margin-bottom: 12px; font-weight: 700; }
         
+        /* Mode Switcher Buttons */
+        .mode-selector { display: flex; background: #e2e8f0; padding: 4px; border-radius: 8px; margin-bottom: 12px; }
+        .mode-btn { flex: 1; border: none; padding: 8px; font-size: 0.9rem; font-weight: 600; border-radius: 6px; cursor: pointer; background: transparent; color: #475569; transition: all 0.2s; }
+        .mode-btn.active { background: #fff; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        
         .form-group { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
         .input-wrapper { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 0.8rem; font-weight: 600; color: #64748b; }
-        input, select, button { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; background: #fff; }
+        input, button { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; background: #fff; }
         button { background: var(--primary); color: white; font-weight: 600; border: none; cursor: pointer; transition: background 0.2s; }
         button:hover { background: var(--primary-hover); }
         #map { flex: 1; width: 100%; }
         
-        .map-legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); line-height: 1.6; font-size: 0.85rem; }
-        .legend-item { display: flex; align-items: center; gap: 8px; }
-        .color-box { width: 16px; height: 16px; border-radius: 4px; border: 2px solid; }
+        .slider-container { display: flex; align-items: center; gap: 8px; }
+        .slider-val { font-size: 0.9rem; font-weight: 600; width: 45px; text-align: right; }
+        .hidden { display: none !important; }
 
         @media (min-width: 768px) {
             .app-container { flex-direction: row; }
@@ -43,34 +48,33 @@
 
     <div class="app-container">
         <div class="control-panel">
-            <h1>Commute Time Mapper</h1>
+            <h1>Boundary Mapping Tool</h1>
+            
+            <div class="mode-selector">
+                <button class="mode-btn active" id="btn-distance" onclick="switchMode('distance')">Distance Radius</button>
+                <button class="mode-btn" id="btn-time" onclick="switchMode('time')">Drive Time Perimeter</button>
+            </div>
+
             <div class="form-group">
                 <div class="input-wrapper">
-                    <label for="location">Starting Point</label>
+                    <label for="location">Location Search</label>
                     <input type="text" id="location" placeholder="e.g., McDowall, QLD" value="McDowall, QLD">
                 </div>
                 
                 <div class="input-wrapper">
-                    <label for="travel-time">Drive Duration</label>
-                    <select id="travel-time">
-                        <option value="15">15 Minutes</option>
-                        <option value="30" selected>30 Minutes</option>
-                        <option value="45">45 Minutes</option>
-                        <option value="60">60 Minutes</option>
-                    </select>
+                    <label id="value-label" for="target-val">Radius Distance (km)</label>
+                    <input type="number" id="target-val" value="5" min="0.1" step="0.1">
                 </div>
 
-                <div class="input-wrapper">
-                    <label for="time-profile">Time Profile</label>
-                    <select id="time-profile">
-                        <option value="overlay">Compare Peak vs Off-Peak</option>
-                        <option value="offpeak">Off-Peak Only (Midnight / Free Run)</option>
-                        <option value="morning">Monday 8:00 AM (Inbound Peak)</option>
-                        <option value="evening">Monday 5:00 PM (Outbound Peak)</option>
-                    </select>
+                <div class="input-wrapper hidden" id="traffic-group">
+                    <label for="traffic-slider">Traffic Congestion Delay</label>
+                    <div class="slider-container">
+                        <input type="range" id="traffic-slider" min="0" max="80" value="0" oninput="updateSliderLabel(this.value)">
+                        <span class="slider-val" id="slider-txt">0%</span>
+                    </div>
                 </div>
 
-                <button onclick="calculateBoundary()">Generate Map</button>
+                <button onclick="calculateBoundary()">Generate Map Overlay</button>
             </div>
         </div>
 
@@ -79,15 +83,40 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
-        // PASTE YOUR WORKING OPENROUTESERVICE KEY HERE
-        const apiKey = 'YOUR_OPENROUTESERVICE_KEY'; 
+        // PASTE YOUR WORKING OPENROUTESERVICE API KEY HERE
+        const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
 
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
-        let layerGroup = L.layerGroup().addTo(map);
+        let currentLayer = null;
         let centerMarker = null;
-        let legendControl = null;
+        let activeMode = 'distance';
+
+        // Handles swapping seamlessly between Distance and Time modes
+        function switchMode(mode) {
+            activeMode = mode;
+            document.getElementById('btn-distance').classList.toggle('active', mode === 'distance');
+            document.getElementById('btn-time').classList.toggle('active', mode === 'time');
+            
+            const label = document.getElementById('value-label');
+            const input = document.getElementById('target-val');
+            const trafficGroup = document.getElementById('traffic-group');
+
+            if (mode === 'distance') {
+                label.innerText = "Radius Distance (km)";
+                input.value = "5";
+                trafficGroup.classList.add('hidden');
+            } else {
+                label.innerText = "Travel Duration (Minutes)";
+                input.value = "30";
+                trafficGroup.classList.remove('hidden');
+            }
+        }
+
+        function updateSliderLabel(val) {
+            document.getElementById('slider-txt').innerText = val + '%';
+        }
 
         async function calculateBoundary() {
             const locationQuery = document.getElementById('location').value;
@@ -101,46 +130,44 @@
                 const lat = parseFloat(data[0].lat);
                 const lon = parseFloat(data[0].lon);
                 
-                renderLayers(lat, lon);
+                renderMapLayers(lat, lon);
             } catch (err) {
-                alert("Error calling map coordinates.");
+                alert("Error connecting to location services.");
             }
         }
 
-        async function renderLayers(lat, lon) {
-            layerGroup.clearLayers();
+        function renderMapLayers(lat, lon) {
+            // Reset previous drawings safely
+            if (currentLayer) map.removeLayer(currentLayer);
             if (centerMarker) map.removeLayer(centerMarker);
-            if (legendControl) map.removeControl(legendControl);
 
             centerMarker = L.marker([lat, lon]).addTo(map);
-            
-            const minutes = parseInt(document.getElementById('travel-time').value);
-            const profile = document.getElementById('time-profile').value;
 
-            if (profile === 'offpeak') {
-                // Flawless, baseline standard run (Blue)
-                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Off-Peak');
-            } else if (profile === 'morning') {
-                // Inbound Commute - Heavy congestion scaling (Red)
-                await addIsochroneLayer(lat, lon, minutes * 0.62, '#dc2626', '#f87171', 'Monday 8:00 AM');
-            } else if (profile === 'evening') {
-                // Outbound Commute - Standard evening congestion scaling (Orange)
-                await addIsochroneLayer(lat, lon, minutes * 0.66, '#ea580c', '#fb923c', 'Monday 5:00 PM');
-            } else if (profile === 'overlay') {
-                // Draw everything together to create the multi-layered analysis view
-                await addIsochroneLayer(lat, lon, minutes, '#2563eb', '#3b82f6', 'Off-Peak');
-                await addIsochroneLayer(lat, lon, minutes * 0.66, '#ea580c', '#fb923c', 'Monday 5:00 PM');
-                await addIsochroneLayer(lat, lon, minutes * 0.62, '#dc2626', '#f87171', 'Monday 8:00 AM');
-                addLegend();
+            const inputVal = parseFloat(document.getElementById('target-val').value);
+            if (isNaN(inputVal) || inputVal <= 0) return alert("Please enter a valid number.");
+
+            if (activeMode === 'distance') {
+                // Render Distance Circle Mode
+                currentLayer = L.circle([lat, lon], {
+                    color: '#2563eb',
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.2,
+                    radius: inputVal * 1000 // Convert km to meters
+                }).addTo(map);
+                
+                map.fitBounds(currentLayer.getBounds());
+            } else {
+                // Render Drive Time Isochrone Mode
+                const trafficPenalty = parseFloat(document.getElementById('traffic-slider').value) / 100;
+                // Penalise the available time window based on user's manual congestion percentage slider
+                const adjustedMinutes = inputVal * (1 - trafficPenalty);
+                
+                fetchIsochrone(lat, lon, adjustedMinutes);
             }
-
-            const allLayers = layerGroup.getLayers().concat(centerMarker);
-            const bounds = L.featureGroup(allLayers).getBounds();
-            map.fitBounds(bounds);
         }
 
-        async function addIsochroneLayer(lat, lon, minutes, strokeColor, fillColor, label) {
-            const seconds = minutes * 60;
+        async function fetchIsochrone(lat, lon, minutes) {
+            const seconds = Math.round(minutes * 60);
             const url = `https://api.openrouteservice.org/v2/isochrones/driving-car`;
 
             try {
@@ -148,44 +175,41 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': apiKey },
                     body: JSON.stringify({
-                        locations: [[parseFloat(lon), parseFloat(lat)]],
+                        locations: [[parseFloat(lon), parseFloat(lat)]], // Crucial: Lon then Lat
                         range: [seconds],
                         range_type: 'time'
                     })
                 });
 
+                if (!response.ok) throw new Error("API rejection status: " + response.status);
+
                 const geojsonData = await response.json();
                 
-                L.geoJSON(geojsonData, {
-                    style: { color: strokeColor, fillColor: fillColor, fillOpacity: 0.2, weight: 3 }
-                }).addTo(layerGroup);
+                currentLayer = L.geoJSON(geojsonData, {
+                    style: {
+                        color: '#dc2626',
+                        fillColor: '#f87171',
+                        fillOpacity: 0.3,
+                        weight: 3
+                    }
+                }).addTo(map);
+
+                map.fitBounds(currentLayer.getBounds());
             } catch (err) {
-                console.error(err);
+                console.error("Mapping Error:", err);
+                alert("Failed to compute drive perimeter. Please check your API key.");
             }
         }
 
-        function addLegend() {
-            legendControl = L.control({ position: 'bottomright' });
-            legendControl.onAdd = function () {
-                const div = L.DomUtil.create('div', 'map-legend');
-                div.innerHTML = `
-                    <strong>Commute Profiles</strong><br>
-                    <div class="legend-item"><div class="color-box" style="background:#3b82f6; border-color:#2563eb; opacity:0.6;"></div> Midnight Free Run</div>
-                    <div class="legend-item"><div class="color-box" style="background:#fb923c; border-color:#ea580c; opacity:0.6;"></div> Monday 5:00 PM</div>
-                    <div class="legend-item"><div class="color-box" style="background:#f87171; border-color:#dc2626; opacity:0.6;"></div> Monday 8:00 AM</div>
-                `;
-                return div;
-            };
-            legendControl.addTo(map);
-        }
-
+        // Tap directly onto map view to trigger computations instantly
         map.on('click', function(e) {
             document.getElementById('location').value = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-            renderLayers(e.latlng.lat, e.latlng.lng);
+            renderMapLayers(e.latlng.lat, e.latlng.lng);
         });
 
+        // Safe layout verification on initial execution
         if(apiKey !== 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0=') {
-            renderLayers(-27.4701, 153.0213);
+            renderMapLayers(-27.4701, 153.0213);
         }
     </script>
 </body>
