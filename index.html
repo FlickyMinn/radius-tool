@@ -53,7 +53,7 @@
                     <input type="number" id="target-val" value="30" min="1">
                 </div>
 
-                <button onclick="calculateBoundary()">Generate Layer</button>
+                <button onclick="handleGenerateButton()">Generate Layer</button>
                 <button class="btn-clear" onclick="clearAllLayers()">Clear All Layers</button>
             </div>
         </div>
@@ -69,11 +69,14 @@
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
-        // A persistent container group to hold all your stacked overlays together
         let layerGroup = L.layerGroup().addTo(map);
         let centerMarker = null;
 
-        // Color rotation array to differentiate your stacked layers automatically
+        // Global variables to remember the active location reliably
+        let currentLat = -27.4701;
+        let currentLng = 153.0213;
+        let lastSearchedText = "McDowall, QLD";
+
         const colors = [
             { stroke: '#2563eb', fill: '#3b82f6' }, // Blue
             { stroke: '#dc2626', fill: '#f87171' }, // Red
@@ -86,29 +89,36 @@
         function clearAllLayers() {
             layerGroup.clearLayers();
             if (centerMarker) map.removeLayer(centerMarker);
+            centerMarker = null;
             colorIndex = 0;
         }
 
-        async function calculateBoundary() {
-            const locationQuery = document.getElementById('location').value;
-            if (!locationQuery) return;
+        // Triggered by the main action button
+        async function handleGenerateButton() {
+            const locationInput = document.getElementById('location').value.trim();
+            
+            // If the user hasn't changed the text box address, use the coordinates we already have stored
+            if (locationInput === lastSearchedText || locationInput.includes(',')) {
+                runDrawingEngine(currentLat, currentLng);
+            } else {
+                // Otherwise, perform a fresh address search lookup
+                try {
+                    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationInput)}`);
+                    const data = await response.json();
+                    if (!data || data.length === 0) return alert("Location not found.");
 
-            try {
-                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationQuery)}`);
-                const data = await response.json();
-                if (!data || data.length === 0) return alert("Location not found.");
-
-                const lat = parseFloat(data[0].lat);
-                const lon = parseFloat(data[0].lon);
-                
-                runDrawingEngine(lat, lon);
-            } catch (err) {
-                alert("Geocoding lookup failed.");
+                    currentLat = parseFloat(data[0].lat);
+                    currentLng = parseFloat(data[0].lon);
+                    lastSearchedText = locationInput;
+                    
+                    runDrawingEngine(currentLat, currentLng);
+                } catch (err) {
+                    alert("Address lookup failed.");
+                }
             }
         }
 
         function runDrawingEngine(lat, lon) {
-            // Drop a center marker if it doesn't exist yet
             if (!centerMarker) {
                 centerMarker = L.marker([lat, lon]).addTo(map);
             } else {
@@ -118,12 +128,10 @@
             const inputVal = parseFloat(document.getElementById('target-val').value);
             const selectedMode = document.getElementById('mode-select').value;
             
-            // Pick the next color styling from our array loop
             const currentStyle = colors[colorIndex % colors.length];
             colorIndex++;
 
             if (selectedMode === 'distance') {
-                // Direct Geometric Drawing Mode stacked into the active layer group
                 const newCircle = L.circle([lat, lon], {
                     color: currentStyle.stroke,
                     fillColor: currentStyle.fill,
@@ -133,16 +141,11 @@
                 
                 map.fitBounds(newCircle.getBounds());
             } else {
-                // Isochrone Routing Mode
                 let minutes = inputVal;
-                let stroke = currentStyle.stroke;
-                let fill = currentStyle.fill;
-
                 if (selectedMode === 'time-traffic') {
-                    minutes = inputVal * 0.65; // Apply simulated rush hour traffic scaling
+                    minutes = inputVal * 0.65;
                 }
-
-                fetchDrivePerimeter(lat, lon, minutes, stroke, fill);
+                fetchDrivePerimeter(lat, lon, minutes, currentStyle.stroke, currentStyle.fill);
             }
         }
 
@@ -161,7 +164,7 @@
                     })
                 });
 
-                if (!response.ok) throw new Error(`API error code: ${response.status}`);
+                if (!response.ok) throw new Error(`API error: ${response.status}`);
 
                 const geojsonData = await response.json();
                 
@@ -171,13 +174,21 @@
 
                 map.fitBounds(newPoly.getBounds());
             } catch (err) {
-                alert("Map Render Failed: " + err.message);
+                alert("Drive perimeter calculation failed.");
             }
         }
 
+        // Map Click Action
         map.on('click', function(e) {
-            document.getElementById('location').value = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-            runDrawingEngine(e.latlng.lat, e.latlng.lng);
+            currentLat = e.latlng.lat;
+            currentLng = e.latlng.lng;
+            
+            // Format coordinates nicely in the text box
+            const displayCoords = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
+            document.getElementById('location').value = displayCoords;
+            lastSearchedText = displayCoords;
+            
+            runDrawingEngine(currentLat, currentLng);
         });
     </script>
 </body>
