@@ -146,44 +146,48 @@
         }
 
         // Fetch real-world drive network perimeter via free Public API API
-        async function fetchIsochrone(lat, lon, minutes) {
-            const seconds = minutes * 60;
-            // Public demo API token structure for routing computations
-            const apiKey = '5b3ce3597851110001cf6248cc94b59b32594a91bb49f25bfce85971'; 
-            const url = `https://api.openrouteservice.org/v2/isochrones/driving-car`;
+async function fetchIsochrone(lat, lon, minutes) {
+    const seconds = minutes * 60;
+    // Public fallback API token
+    const apiKey = '5b3ce3597851110001cf6248cc94b59b32594a91bb49f25bfce85971'; 
+    const url = `https://api.openrouteservice.org/v2/isochrones/driving-car`;
 
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': apiKey
-                    },
-                    body: JSON.stringify({
-                        locations: [[lon, lat]], // API requires [longitude, latitude] configuration
-                        range: [seconds],
-                        range_type: 'time'
-                    })
-                });
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': apiKey
+            },
+            body: JSON.stringify({
+                // Ensure longitude is definitely first, followed by latitude
+                locations: [[parseFloat(lon), parseFloat(lat)]], 
+                range: [seconds],
+                range_type: 'time'
+            })
+        });
 
-                const geojsonData = await response.json();
-                
-                // Render the complex, non-circular drive perimeter shape
-                currentLayer = L.geoJSON(geojsonData, {
-                    style: {
-                        color: '#dc2626',      // Red border for travel alert distinction
-                        fillColor: '#f87171',  // Light red shading inside boundaries
-                        fillOpacity: 0.3,
-                        weight: 3
-                    }
-                }).addTo(map);
-
-                map.fitBounds(currentLayer.getBounds());
-            } catch (err) {
-                alert("Failed to compute drive time perimeter. The public API tier might be busy.");
-            }
+        if (!response.ok) {
+            throw new Error(`Server returned status: ${response.status}`);
         }
 
+        const geojsonData = await response.json();
+        
+        currentLayer = L.geoJSON(geojsonData, {
+            style: {
+                color: '#dc2626',
+                fillColor: '#f87171',
+                fillOpacity: 0.3,
+                weight: 3
+            }
+        }).addTo(map);
+
+        map.fitBounds(currentLayer.getBounds());
+    } catch (err) {
+        console.error("API Error Details:", err);
+        alert("Failed to compute drive time. The public token might be rate-limited. Try again in a moment or drop in a custom API key.");
+    }
+}
         // Tap directly onto mapping layout to immediately compute and drop perimeters
         map.on('click', function(e) {
             document.getElementById('location').value = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
