@@ -7,43 +7,76 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
-        body { display: flex; flex-direction: column; height: 100vh; background: #f8fafc; color: #0f172a; }
-        .app-container { display: flex; flex-direction: column; height: 100%; }
-        .control-panel { background: white; padding: 16px; z-index: 1000; border-bottom: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        h1 { font-size: 1.1rem; margin-bottom: 12px; font-weight: 700; }
-        .form-group { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-        .input-wrapper { flex: 1; min-width: 130px; display: flex; flex-direction: column; gap: 4px; }
+        body { display: flex; flex-direction: column; height: 100vh; background: #f8fafc; color: #0f172a; overflow: hidden; }
+        .app-container { display: flex; flex-direction: column; height: 100%; position: relative; }
+        
+        .mobile-header { background: white; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; z-index: 2000; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .mobile-header h1 { font-size: 1.1rem; font-weight: 700; }
+        .menu-toggle-btn { background: #2563eb; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; display: block; width: auto; }
+
+        .control-panel { 
+            background: white; 
+            padding: 16px; 
+            z-index: 1999; 
+            position: absolute;
+            top: 53px; 
+            left: 0;
+            right: 0;
+            display: none; 
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            max-height: calc(100vh - 53px);
+            overflow-y: auto;
+        }
+        .control-panel.show { display: block; }
+
+        .form-group { display: flex; flex-direction: column; gap: 12px; }
+        .input-wrapper { display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 0.8rem; font-weight: 600; color: #64748b; }
-        input, select, button { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; }
+        input, select, button { width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; -webkit-appearance: none; }
         
         button { background: #2563eb; color: white; font-weight: 600; border: none; cursor: pointer; transition: background 0.2s; }
         button:hover { background: #1d4ed8; }
         
-        .btn-measure { background: #db2777; margin-top: 4px; }
+        .btn-measure { background: #db2777; }
         .btn-measure:hover { background: #be185d; }
-        .btn-measure.active { background: #9d174d; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); border: 2px solid #fff; }
+        .btn-measure.active { background: #9d174d; color: white; font-weight: 700; }
         
-        .btn-clear { background: #64748b; margin-top: 4px; }
+        .btn-clear { background: #64748b; }
         .btn-clear:hover { background: #475569; }
-        #map { flex: 1; width: 100%; }
         
-        .map-legend { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); line-height: 1.6; font-size: 0.85rem; max-width: 240px; }
-        .legend-title { font-weight: 700; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
-        .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-        .color-box { width: 24px; height: 14px; border-radius: 3px; border: 2px solid; opacity: 0.7; }
+        #map { flex: 1; width: 100%; z-index: 1; }
         
+        .map-legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); line-height: 1.5; font-size: 0.8rem; max-width: 200px; }
+        .legend-title { font-weight: 700; margin-bottom: 4px; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+        .color-box { width: 20px; height: 12px; border-radius: 3px; border: 2px solid; opacity: 0.7; }
+
         @media (min-width: 768px) {
+            .mobile-header { display: none; }
             .app-container { flex-direction: row; }
-            .control-panel { width: 320px; height: 100%; border-bottom: none; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 12px; }
-            .form-group { flex-direction: column; align-items: stretch; gap: 12px; }
+            .control-panel { 
+                display: flex !important; 
+                position: relative; 
+                width: 320px; 
+                height: 100%; 
+                top: 0;
+                box-shadow: none; 
+                border-right: 1px solid #e2e8f0; 
+                flex-direction: column; 
+                gap: 12px; 
+            }
         }
     </style>
 </head>
 <body>
 
     <div class="app-container">
-        <div class="control-panel">
+        <div class="mobile-header">
             <h1>Boundary Mapper</h1>
+            <button class="menu-toggle-btn" onclick="toggleMobileMenu()">Adjust Settings</button>
+        </div>
+
+        <div id="controls" class="control-panel">
             <div class="form-group">
                 <div class="input-wrapper">
                     <label for="location">Starting Point</label>
@@ -64,8 +97,8 @@
                     <input type="number" id="target-val" value="5" min="1">
                 </div>
 
-                <button onclick="handleGenerateButton()">Generate Layer</button>
-                <button id="measure-btn" class="btn-measure" onclick="toggleRulerTool()">Turn On Distance Ruler</button>
+                <button onclick="handleGenerateButtonWithClose()">Generate Layer</button>
+                <button id="measure-btn" class="btn-measure" onclick="toggleRulerToolWithClose()">Turn On Distance Ruler</button>
                 <button class="btn-clear" onclick="clearAllLayers()">Clear All Layers</button>
             </div>
         </div>
@@ -85,7 +118,6 @@
         let centerMarker = null;
         let legendControl = null;
         
-        // Custom measurement engine state tracking
         let isRulerActive = false;
         let measurePoints = [];
         let measureLine = null;
@@ -93,6 +125,9 @@
 
         let currentLat = -27.4701;
         let currentLng = 153.0213;
+
+        // Establish the initial default marker on load
+        centerMarker = L.marker([currentLat, currentLng]).addTo(map);
 
         const colors = [
             { stroke: '#2563eb', fill: '#3b82f6' }, 
@@ -104,12 +139,17 @@
         let colorIndex = 0;
         let activeLayersData = [];
 
+        function toggleMobileMenu() {
+            const panel = document.getElementById('controls');
+            panel.classList.toggle('show');
+        }
+
         function toggleRulerTool() {
             const btn = document.getElementById('measure-btn');
             isRulerActive = !isRulerActive;
 
             if (isRulerActive) {
-                btn.innerText = "Ruler Active: Click 2 Points";
+                btn.innerText = "Ruler Active: Tap 2 Map Points";
                 btn.classList.add('active');
                 clearMeasurementDrawing();
             } else {
@@ -117,6 +157,11 @@
                 btn.classList.remove('active');
                 clearMeasurementDrawing();
             }
+        }
+
+        function toggleRulerToolWithClose() {
+            toggleRulerTool();
+            if (window.innerWidth < 768) toggleMobileMenu(); 
         }
 
         function clearMeasurementDrawing() {
@@ -148,13 +193,23 @@
 
         function clearAllLayers() {
             layerGroup.clearLayers();
-            if (centerMarker) map.removeLayer(centerMarker);
-            centerMarker = null;
             colorIndex = 0;
             activeLayersData = [];
             if (legendControl) map.removeControl(legendControl);
             clearMeasurementDrawing();
-            if (isRulerActive) toggleRulerTool();
+            if (isRulerActive) {
+                isRulerActive = false;
+                const btn = document.getElementById('measure-btn');
+                btn.innerText = "Turn On Distance Ruler";
+                btn.classList.remove('active');
+            }
+            // Reset marker position to input coordinates
+            if (centerMarker) centerMarker.setLatLng([currentLat, currentLng]);
+        }
+
+        async function handleGenerateButtonWithClose() {
+            if (window.innerWidth < 768) toggleMobileMenu();
+            await handleGenerateButton();
         }
 
         async function handleGenerateButton() {
@@ -190,10 +245,16 @@
                 centerMarker.setLatLng([lat, lon]);
             }
 
-            const inputVal = parseFloat(document.getElementById('target-val').value);
+            let inputVal = parseFloat(document.getElementById('target-val').value);
             const selectedMode = document.getElementById('mode-select').value;
             const modeText = document.getElementById('mode-select').options[document.getElementById('mode-select').selectedIndex].text;
             
+            if (selectedMode !== 'distance' && inputVal > 60) {
+                alert("OpenRouteService limits calculations to 60 minutes max.");
+                inputVal = 60;
+                document.getElementById('target-val').value = 60;
+            }
+
             const currentStyle = colors[colorIndex % colors.length];
             colorIndex++;
 
@@ -203,7 +264,7 @@
                 const newCircle = L.circle([lat, lon], {
                     color: currentStyle.stroke,
                     fillColor: currentStyle.fill,
-                    fillOpacity: 0.15,
+                    fillOpacity: 0.12,
                     radius: inputVal * 1000
                 }).addTo(layerGroup);
                 
@@ -241,7 +302,7 @@
                 const geojsonData = await response.json();
                 
                 L.geoJSON(geojsonData, {
-                    style: { color: style.stroke, fillColor: style.fill, fillOpacity: 0.15, weight: 3 }
+                    style: { color: style.stroke, fillColor: style.fill, fillOpacity: 0.12, weight: 3 }
                 }).addTo(layerGroup);
 
                 activeLayersData.push({ label: label, style: style });
@@ -254,34 +315,35 @@
             }
         }
 
-        // Map Interactions Router
         map.on('click', function(e) {
             if (isRulerActive) {
-                // RUN NATIVE MEASUREMENT ENGINE
                 measurePoints.push(e.latlng);
                 
-                const dot = L.circleMarker(e.latlng, { radius: 5, color: '#db2777', fillColor: '#fff', fillOpacity: 1 }).addTo(map);
+                const dot = L.circleMarker(e.latlng, { radius: 6, color: '#db2777', fillColor: '#fff', fillOpacity: 1, weight: 3 }).addTo(map);
                 measureMarkers.push(dot);
 
                 if (measurePoints.length === 1) {
-                    dot.bindPopup("Start point selected.").openPopup();
+                    dot.bindPopup("Start point set. Tap the next spot.").openPopup();
                 } else if (measurePoints.length === 2) {
-                    // Compute pure point-to-point geometric distance in meters
                     const distanceMeters = measurePoints[0].distanceTo(measurePoints[1]);
                     const distanceKm = (distanceMeters / 1000).toFixed(2);
 
                     measureLine = L.polyline(measurePoints, { color: '#db2777', weight: 4, dashArray: '6, 6' }).addTo(map);
-                    
                     dot.bindPopup(`<strong>Distance:</strong> ${distanceKm} km`).openPopup();
                     
-                    // Reset tool cleanly after displaying computation
-                    toggleRulerTool();
+                    toggleRulerTool(); 
                 }
             } else {
-                // NORMAL MODE: Update text coordinates box cleanly
                 currentLat = e.latlng.lat;
                 currentLng = e.latlng.lng;
                 document.getElementById('location').value = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
+                
+                // CRITICAL FIX: Ensure the blue map pin immediately tracks to the tapped coordinates
+                if (!centerMarker) {
+                    centerMarker = L.marker(e.latlng).addTo(map);
+                } else {
+                    centerMarker.setLatLng(e.latlng);
+                }
             }
         });
     </script>
