@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Map Boundary Overlay</title>
+    <title>Multi-Overlay Commute Mapper</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, sans-serif; }
@@ -17,11 +17,13 @@
         input, select, button { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; }
         button { background: #2563eb; color: white; font-weight: 600; border: none; cursor: pointer; }
         button:hover { background: #1d4ed8; }
+        .btn-clear { background: #64748b; margin-top: 4px; }
+        .btn-clear:hover { background: #475569; }
         #map { flex: 1; width: 100%; }
         
         @media (min-width: 768px) {
             .app-container { flex-direction: row; }
-            .control-panel { width: 320px; height: 100%; border-bottom: none; border-right: 1px solid #e2e8f0; }
+            .control-panel { width: 320px; height: 100%; border-bottom: none; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 12px; }
             .form-group { flex-direction: column; align-items: stretch; gap: 12px; }
         }
     </style>
@@ -48,10 +50,11 @@
 
                 <div class="input-wrapper">
                     <label for="target-val">Value (km or minutes)</label>
-                    <input type="number" id="target-val" value="5" min="1">
+                    <input type="number" id="target-val" value="30" min="1">
                 </div>
 
                 <button onclick="calculateBoundary()">Generate Layer</button>
+                <button class="btn-clear" onclick="clearAllLayers()">Clear All Layers</button>
             </div>
         </div>
 
@@ -63,12 +66,28 @@
         // STEP 1: PUSH YOUR ACTUAL TOKEN PRECISELY BETWEEN THESE QUOTES
         const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
 
-        // Initialise the map view
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
-        let currentLayer = null;
+        // A persistent container group to hold all your stacked overlays together
+        let layerGroup = L.layerGroup().addTo(map);
         let centerMarker = null;
+
+        // Color rotation array to differentiate your stacked layers automatically
+        const colors = [
+            { stroke: '#2563eb', fill: '#3b82f6' }, // Blue
+            { stroke: '#dc2626', fill: '#f87171' }, // Red
+            { stroke: '#ea580c', fill: '#fb923c' }, // Orange
+            { stroke: '#16a34a', fill: '#4ade80' }, // Green
+            { stroke: '#9333ea', fill: '#c084fc' }  // Purple
+        ];
+        let colorIndex = 0;
+
+        function clearAllLayers() {
+            layerGroup.clearLayers();
+            if (centerMarker) map.removeLayer(centerMarker);
+            colorIndex = 0;
+        }
 
         async function calculateBoundary() {
             const locationQuery = document.getElementById('location').value;
@@ -89,35 +108,38 @@
         }
 
         function runDrawingEngine(lat, lon) {
-            // Clean out old elements dynamically
-            if (currentLayer) map.removeLayer(currentLayer);
-            if (centerMarker) map.removeLayer(centerMarker);
-
-            centerMarker = L.marker([lat, lon]).addTo(map);
+            // Drop a center marker if it doesn't exist yet
+            if (!centerMarker) {
+                centerMarker = L.marker([lat, lon]).addTo(map);
+            } else {
+                centerMarker.setLatLng([lat, lon]);
+            }
 
             const inputVal = parseFloat(document.getElementById('target-val').value);
             const selectedMode = document.getElementById('mode-select').value;
+            
+            // Pick the next color styling from our array loop
+            const currentStyle = colors[colorIndex % colors.length];
+            colorIndex++;
 
             if (selectedMode === 'distance') {
-                // Direct Geometric Drawing Mode
-                currentLayer = L.circle([lat, lon], {
-                    color: '#2563eb',
-                    fillColor: '#3b82f6',
-                    fillOpacity: 0.25,
+                // Direct Geometric Drawing Mode stacked into the active layer group
+                const newCircle = L.circle([lat, lon], {
+                    color: currentStyle.stroke,
+                    fillColor: currentStyle.fill,
+                    fillOpacity: 0.2,
                     radius: inputVal * 1000
-                }).addTo(map);
+                }).addTo(layerGroup);
                 
-                map.fitBounds(currentLayer.getBounds());
+                map.fitBounds(newCircle.getBounds());
             } else {
                 // Isochrone Routing Mode
                 let minutes = inputVal;
-                let stroke = '#dc2626';
-                let fill = '#f87171';
+                let stroke = currentStyle.stroke;
+                let fill = currentStyle.fill;
 
                 if (selectedMode === 'time-traffic') {
-                    minutes = inputVal * 0.65; // Apply traffic reduction directly
-                    stroke = '#ea580c';
-                    fill = '#fb923c';
+                    minutes = inputVal * 0.65; // Apply simulated rush hour traffic scaling
                 }
 
                 fetchDrivePerimeter(lat, lon, minutes, stroke, fill);
@@ -139,32 +161,24 @@
                     })
                 });
 
-                if (!response.ok) {
-                    const errData = await response.text();
-                    throw new Error(`API rejected request: ${response.status} - ${errData}`);
-                }
+                if (!response.ok) throw new Error(`API error code: ${response.status}`);
 
                 const geojsonData = await response.json();
                 
-                currentLayer = L.geoJSON(geojsonData, {
-                    style: { color: strokeColor, fillColor: fillColor, fillOpacity: 0.3, weight: 3 }
-                }).addTo(map);
+                const newPoly = L.geoJSON(geojsonData, {
+                    style: { color: strokeColor, fillColor: fillColor, fillOpacity: 0.2, weight: 3 }
+                }).addTo(layerGroup);
 
-                map.fitBounds(currentLayer.getBounds());
+                map.fitBounds(newPoly.getBounds());
             } catch (err) {
-                console.error(err);
-                alert("Map Render Failed. Trace details: " + err.message);
+                alert("Map Render Failed: " + err.message);
             }
         }
 
-        // Tap interface connector
         map.on('click', function(e) {
             document.getElementById('location').value = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
             runDrawingEngine(e.latlng.lat, e.latlng.lng);
         });
-
-        // Trigger default map display on load automatically
-        runDrawingEngine(-27.4701, 153.0213);
     </script>
 </body>
 </html>
