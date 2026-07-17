@@ -41,6 +41,9 @@
         .btn-measure:hover { background: #be185d; }
         .btn-measure.active { background: #9d174d; color: white; font-weight: 700; }
         
+        .btn-clear-measure { background: #be185d; color: white; display: none; }
+        .btn-clear-measure:hover { background: #9d174d; }
+        
         .btn-clear { background: #64748b; }
         .btn-clear:hover { background: #475569; }
         
@@ -98,7 +101,8 @@
                 </div>
 
                 <button onclick="handleGenerateButtonWithClose()">Generate Layer</button>
-                <button id="measure-btn" class="btn-measure" onclick="toggleRulerToolWithClose()">Turn On Distance Ruler</button>
+                <button id="measure-btn" class="btn-measure" onclick="toggleRulerTool()">Turn On Ruler Tool</button>
+                <button id="clear-measure-btn" class="btn-clear-measure" onclick="clearMeasurementDrawing()">Clear Active Measurement</button>
                 <button class="btn-clear" onclick="clearAllLayers()">Clear All Layers</button>
             </div>
         </div>
@@ -106,9 +110,9 @@
         <div id="map"></div>
     </div>
 
+    <!-- Load Leaflet and Geodesy for accurate area/distance math -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Your OpenRouteService API key is now embedded permanently
         const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
 
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
@@ -118,15 +122,17 @@
         let centerMarker = null;
         let legendControl = null;
         
+        // Advanced Ruler & Area variables
         let isRulerActive = false;
-        let measurePoints = [];
-        let measureLine = null;
         let measureMarkers = [];
+        let measureLine = null;
+        let measurePolygon = null;
+        let isAreaClosed = false;
+        let measurePopup = null;
 
         let currentLat = -27.4701;
         let currentLng = 153.0213;
 
-        // Default map load pin
         centerMarker = L.marker([currentLat, currentLng]).addTo(map);
 
         const colors = [
@@ -144,39 +150,164 @@
             panel.classList.toggle('show');
         }
 
-        function toggleRulerTool(deactivateOnly = false) {
+        function toggleRulerTool() {
             const btn = document.getElementById('measure-btn');
-            
-            if (deactivateOnly) {
-                isRulerActive = false;
-                btn.innerText = "Turn On Distance Ruler";
-                btn.classList.remove('active');
-                return;
-            }
-
+            const clearBtn = document.getElementById('clear-measure-btn');
             isRulerActive = !isRulerActive;
 
             if (isRulerActive) {
-                btn.innerText = "Ruler Active: Tap 2 Map Points";
+                btn.innerText = "Ruler Mode: Tap Map Points";
                 btn.classList.add('active');
-                clearMeasurementDrawing(); 
+                clearBtn.style.display = 'block';
+                if (window.innerWidth < 768) toggleMobileMenu();
             } else {
-                btn.innerText = "Turn On Distance Ruler";
+                btn.innerText = "Turn On Ruler Tool";
                 btn.classList.remove('active');
-                clearMeasurementDrawing();
             }
         }
 
-        function toggleRulerToolWithClose() {
-            toggleRulerTool();
-            if (window.innerWidth < 768) toggleMobileMenu(); 
-        }
-
         function clearMeasurementDrawing() {
-            measurePoints = [];
             if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+            if (measurePolygon) { map.removeLayer(measurePolygon); measurePolygon = null; }
             measureMarkers.forEach(m => map.removeLayer(m));
             measureMarkers = [];
+            isAreaClosed = false;
+            if (measurePopup) { map.closePopup(measurePopup); measurePopup = null; }
+            
+            // Re-sync UI state buttons cleanly
+            document.getElementById('clear-measure-btn').style.display = 'none';
+            if (isRulerActive) {
+                const btn = document.getElementById('measure-btn');
+                btn.innerText = "Ruler Mode: Tap Map Points";
+            }
+        }
+
+        // Standard Spherical Geometry Area formula implementation to avoid extra dependencies
+        function calculatePolygonArea(latlngs) {
+            const radius = 6378137; // Earth radius in meters
+            let area = 0;
+            if (latlngs.length < 3) return 0;
+            
+            for (let i = 0; i < latlngs.length; i++) {
+                let p1 = latlngs[i];
+                let p2 = latlngs[(i + 1) % latlngs.length];
+                area += (p2.lng - p1.lng) * Math.PI / 180 * (2 + Math.sin(p1.lat * Math.PI / 180) + Math.sin(p2.lat * Math.PI / 180));
+            }
+            area = area * radius * radius / 2;
+            return Math.abs(area);
+        }
+
+        function processMeasurementCalculations() {
+            if (measureMarkers.length === 0) return;
+            
+            const latlngs = measureMarkers.map(m => m.getLatLng());
+            
+            // Handle Line rendering
+            if (measureLine) {
+                measureLine.setLatLngs(latlngs);
+            } else {
+                measureLine = L.polyline(latlngs, { color: '#db2777', weight: 4, dashArray: '6, 6' }).addTo(map);
+            }
+
+            // Calculate metrics
+            let totalDistance = 0;
+            for (let i = 0; i < latlngs.length - 1; i++) {
+                totalDistance += latlngs[i].distanceTo(latlngs[i+1]);
+            }
+            
+            let displayString = `<strong>Total Distance:</strong> ${(totalDistance / 1000).toFixed(2)} km`;
+
+            // Handle Polygon Closed Area rendering
+            if (isAreaClosed && latlngs.length >= 3) {
+                if (measurePolygon) {
+                    measurePolygon.setLatLngs(latlngs);
+                } else {
+                    measurePolygon = L.polygon(latlngs, { color: '#db2777', fillColor: '#db2777', fillOpacity: 0.15, weight: 0 }).addTo(map);
+                }
+                const areaMeters = calculatePolygonArea(latlngs);
+                const areaSqKm = (areaMeters / 1000000).toFixed(2);
+                displayString += `<br><strong>Total Area:</strong> ${areaSqKm} km²`;
+            } else if (measurePolygon) {
+                map.removeLayer(measurePolygon);
+                measurePolygon = null;
+            }
+
+            // Pin updates to the terminal coordinate marker node
+            const lastMarker = measureMarkers[measureMarkers.length - 1];
+            if (!measurePopup) {
+                measurePopup = L.popup({ autoClose: false, closeOnClick: false });
+            }
+            measurePopup.setLatLng(lastMarker.getLatLng()).setContent(displayString);
+            if (!map.hasLayer(measurePopup)) measurePopup.addTo(map);
+
+            // Dynamically hint UX statuses to users
+            const btn = document.getElementById('measure-btn');
+            if (isRulerActive) {
+                if (isAreaClosed) {
+                    btn.innerText = "Area Closed. Drag pins to shift.";
+                } else if (measureMarkers.length >= 2) {
+                    btn.innerText = "Tap first point to close area";
+                } else {
+                    btn.innerText = "Ruler Mode: Tap Map Points";
+                }
+            }
+        }
+
+        function createDraggableMeasurementPin(latlng, isFirstNode = false) {
+            const marker = L.circleMarker(latlng, {
+                radius: 8,
+                color: isFirstNode ? '#2563eb' : '#db2777', 
+                fillColor: '#fff',
+                fillOpacity: 1,
+                weight: 3,
+                interactive: true
+            }).addTo(map);
+
+            // Activate dragging properties cleanly via Leaflet mouse interactions
+            marker.on('mousedown', function() {
+                map.dragging.disable();
+                map.on('mousemove', onPinDrag);
+            });
+
+            // Handle mobile touch environments perfectly
+            marker.on('touchstart', function() {
+                map.dragging.disable();
+                map.on('touchmove', onPinDragMobile);
+            });
+
+            function onPinDrag(e) {
+                marker.setLatLng(e.latlng);
+                processMeasurementCalculations();
+            }
+
+            function onPinDragMobile(e) {
+                if(e.touches && e.touches.length) {
+                    const touch = e.touches[0];
+                    const containerPoint = map.mouseEventToContainerPoint(touch);
+                    const latlng = map.containerPointToLatLng(containerPoint);
+                    marker.setLatLng(latlng);
+                    processMeasurementCalculations();
+                }
+            }
+
+            // Universal event bindings to unlock map scaling when drag interaction terminates
+            function endDragMode() {
+                map.dragging.enable();
+                map.off('mousemove', onPinDrag);
+                map.off('touchmove', onPinDragMobile);
+            }
+            
+            map.on('mouseup', endDragMode);
+            map.on('touchend', endDragMode);
+            marker.on('click', function(e) {
+                L.DomEvent.stopPropagation(e); // Safeguard event loop bubbling
+                if (isFirstNode && measureMarkers.length >= 3 && !isAreaClosed) {
+                    isAreaClosed = true;
+                    processMeasurementCalculations();
+                }
+            });
+
+            return marker;
         }
 
         function updateLegendUI() {
@@ -205,9 +336,7 @@
             activeLayersData = [];
             if (legendControl) map.removeControl(legendControl);
             clearMeasurementDrawing();
-            if (isRulerActive) {
-                toggleRulerTool(true); 
-            }
+            if (isRulerActive) toggleRulerTool();
             if (centerMarker) centerMarker.setLatLng([currentLat, currentLng]);
         }
 
@@ -321,24 +450,14 @@
 
         map.on('click', function(e) {
             if (isRulerActive) {
-                measurePoints.push(e.latlng);
-                
-                const dot = L.circleMarker(e.latlng, { radius: 6, color: '#db2777', fillColor: '#fff', fillOpacity: 1, weight: 3 }).addTo(map);
+                // Ignore map placement clicks if user has already wrapped a closed loop shape
+                if (isAreaClosed) return;
+
+                const isFirstNode = measureMarkers.length === 0;
+                const dot = createDraggableMeasurementPin(e.latlng, isFirstNode);
                 measureMarkers.push(dot);
 
-                if (measurePoints.length === 1) {
-                    dot.bindPopup("Start point set. Tap the next spot.").openPopup();
-                } else if (measurePoints.length === 2) {
-                    const distanceMeters = measurePoints[0].distanceTo(measurePoints[1]);
-                    const distanceKm = (distanceMeters / 1000).toFixed(2);
-
-                    // Render the line
-                    measureLine = L.polyline(measurePoints, { color: '#db2777', weight: 4, dashArray: '6, 6' }).addTo(map);
-                    dot.bindPopup(`<strong>Distance:</strong> ${distanceKm} km`).openPopup();
-                    
-                    // Stop measuring, but leave the line and popup visible!
-                    toggleRulerTool(true); 
-                }
+                processMeasurementCalculations();
             } else {
                 currentLat = e.latlng.lat;
                 currentLng = e.latlng.lng;
