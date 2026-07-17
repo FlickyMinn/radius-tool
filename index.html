@@ -108,7 +108,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // STEP 1: PUSH YOUR ACTUAL TOKEN PRECISELY BETWEEN THESE QUOTES
+        // Your OpenRouteService API key is now embedded permanently
         const apiKey = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjhhNmEwODBlYTcwNTRkMWM5MDk4ZmJiNjg2MDFkZjgxIiwiaCI6Im11cm11cjY0In0='; 
 
         const map = L.map('map').setView([-27.4701, 153.0213], 12);
@@ -126,7 +126,7 @@
         let currentLat = -27.4701;
         let currentLng = 153.0213;
 
-        // Establish the initial default marker on load
+        // Default map load pin
         centerMarker = L.marker([currentLat, currentLng]).addTo(map);
 
         const colors = [
@@ -144,14 +144,22 @@
             panel.classList.toggle('show');
         }
 
-        function toggleRulerTool() {
+        function toggleRulerTool(deactivateOnly = false) {
             const btn = document.getElementById('measure-btn');
+            
+            if (deactivateOnly) {
+                isRulerActive = false;
+                btn.innerText = "Turn On Distance Ruler";
+                btn.classList.remove('active');
+                return;
+            }
+
             isRulerActive = !isRulerActive;
 
             if (isRulerActive) {
                 btn.innerText = "Ruler Active: Tap 2 Map Points";
                 btn.classList.add('active');
-                clearMeasurementDrawing();
+                clearMeasurementDrawing(); 
             } else {
                 btn.innerText = "Turn On Distance Ruler";
                 btn.classList.remove('active');
@@ -198,12 +206,8 @@
             if (legendControl) map.removeControl(legendControl);
             clearMeasurementDrawing();
             if (isRulerActive) {
-                isRulerActive = false;
-                const btn = document.getElementById('measure-btn');
-                btn.innerText = "Turn On Distance Ruler";
-                btn.classList.remove('active');
+                toggleRulerTool(true); 
             }
-            // Reset marker position to input coordinates
             if (centerMarker) centerMarker.setLatLng([currentLat, currentLng]);
         }
 
@@ -328,17 +332,18 @@
                     const distanceMeters = measurePoints[0].distanceTo(measurePoints[1]);
                     const distanceKm = (distanceMeters / 1000).toFixed(2);
 
+                    // Render the line
                     measureLine = L.polyline(measurePoints, { color: '#db2777', weight: 4, dashArray: '6, 6' }).addTo(map);
                     dot.bindPopup(`<strong>Distance:</strong> ${distanceKm} km`).openPopup();
                     
-                    toggleRulerTool(); 
+                    // Stop measuring, but leave the line and popup visible!
+                    toggleRulerTool(true); 
                 }
             } else {
                 currentLat = e.latlng.lat;
                 currentLng = e.latlng.lng;
                 document.getElementById('location').value = `${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}`;
                 
-                // CRITICAL FIX: Ensure the blue map pin immediately tracks to the tapped coordinates
                 if (!centerMarker) {
                     centerMarker = L.marker(e.latlng).addTo(map);
                 } else {
